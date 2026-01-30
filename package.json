@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "YouTube channel post and live notifier for Koishi",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
@@ -33,24 +33,11 @@
       ]
     }
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/svip886/koishi-plugin-youtube-notifier.git"
-  },
-  "bugs": {
-    "url": "https://github.com/svip886/koishi-plugin-youtube-notifier/issues"
-  },
-  "homepage": "https://github.com/svip886/koishi-plugin-youtube-notifier#readme",
   "license": "MIT",
   "dependencies": {
     "koishi-plugin-puppeteer": "^3.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "koishi": "^4.17.0",
-    "typescript": "^5.0.0"
-  },
-  "peerDependencies": {
     "koishi": "^4.17.0"
   }
 }
