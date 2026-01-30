@@ -176,6 +176,44 @@ export function apply(ctx: Context, config: Config) {
       return
     }
 
+    const sendMessage = async (targets: string[], title: string, content: string) => {
+      const message = `[${title}]\n${content}`
+      
+      // 1. 尝试使用标准的广播 (Koishi 推荐方式)
+      try {
+        await ctx.broadcast(targets, message)
+        logger.info(`已尝试通过广播推送至: ${targets.join(', ')}`)
+      } catch (e) {
+        logger.error(`广播推送过程中出现错误:`, e)
+      }
+
+      // 2. 如果有 notifier 服务，尝试通过它推送
+      if (ctx.notifier) {
+        for (const target of targets) {
+          try {
+            await ctx.notifier.create({ title, content, target })
+            logger.info(`已尝试通过 notifier 推送至: ${target}`)
+          } catch (e) {
+            logger.debug(`Notifier 推送跳过或失败 [${target}]: ${(e as any).message}`)
+          }
+        }
+      }
+
+      // 3. 降级方案：模仿参考代码，直接找在线 bot 发送 (解决不带前缀的 ID 问题)
+      const bot = ctx.bots.find(b => (b.status as any) === 'online' || (b.status as any) === 1) || ctx.bots[0]
+      if (bot) {
+        for (const target of targets) {
+          try {
+            // 如果 ID 不含冒号，通常 bot.sendMessage 能直接处理
+            await bot.sendMessage(target, message)
+            logger.info(`已尝试通过 Bot(${bot.platform}) 直接推送至: ${target}`)
+          } catch (e) {
+            logger.debug(`Bot 直接推送跳过或失败 [${target}]: ${(e as any).message}`)
+          }
+        }
+      }
+    }
+
     const check = async () => {
       const startTime = Date.now()
       logger.debug('开始执行轮询检查...')
@@ -198,60 +236,21 @@ export function apply(ctx: Context, config: Config) {
           // 新动态提醒
           if (current.lastPostId && current.lastPostId !== saved.lastPostId) {
             logger.info(`检测到频道 ${channelConfig.id} 新动态: ${current.lastPostId}`)
-            const title = `YouTube 新动态`
-            const content = `频道 ${channelConfig.id} 发布了新动态：https://www.youtube.com/post/${current.lastPostId}`
-            
-            if (ctx.notifier) {
-              for (let target of channelConfig.targets) {
-                // 如果是纯数字且没有前缀，针对 onebot 尝试自动补全
-                if (/^\d+$/.test(target)) {
-                  target = `onebot:${target}`
-                }
-                logger.info(`正在通过 notifier 推送至: ${target}`)
-                try {
-                  await ctx.notifier.create({ title, content, target })
-                } catch (e) {
-                  logger.error(`Notifier 推送失败 [${target}]:`, e)
-                }
-              }
-            } else {
-              const targets = channelConfig.targets.map(t => /^\d+$/.test(t) ? `onebot:${t}` : t)
-              logger.info(`正在通过广播推送至: ${targets.join(', ')}`)
-              try {
-                await ctx.broadcast(targets, `[${title}]\n${content}`)
-              } catch (e) {
-                logger.error(`广播推送失败:`, e)
-              }
-            }
+            await sendMessage(
+              channelConfig.targets, 
+              'YouTube 新动态', 
+              `频道 ${channelConfig.id} 发布了新动态：https://www.youtube.com/post/${current.lastPostId}`
+            )
           }
 
           // 开播状态变更提醒
           if (current.isLive && (!saved.isLive || current.lastLiveId !== saved.lastLiveId)) {
             logger.info(`检测到频道 ${channelConfig.id} 正在直播: ${current.lastLiveId}`)
-            const title = `YouTube 开播提醒`
-            const content = `频道 ${channelConfig.id} 正在直播！\n传送门：https://www.youtube.com/watch?v=${current.lastLiveId}`
-
-            if (ctx.notifier) {
-              for (let target of channelConfig.targets) {
-                if (/^\d+$/.test(target)) {
-                  target = `onebot:${target}`
-                }
-                logger.info(`正在通过 notifier 推送至: ${target}`)
-                try {
-                  await ctx.notifier.create({ title, content, target })
-                } catch (e) {
-                  logger.error(`Notifier 推送失败 [${target}]:`, e)
-                }
-              }
-            } else {
-              const targets = channelConfig.targets.map(t => /^\d+$/.test(t) ? `onebot:${t}` : t)
-              logger.info(`正在通过广播推送至: ${targets.join(', ')}`)
-              try {
-                await ctx.broadcast(targets, `[${title}]\n${content}`)
-              } catch (e) {
-                logger.error(`广播推送失败:`, e)
-              }
-            }
+            await sendMessage(
+              channelConfig.targets,
+              'YouTube 开播提醒',
+              `频道 ${channelConfig.id} 正在直播！\n传送门：https://www.youtube.com/watch?v=${current.lastLiveId}`
+            )
           }
 
           // 更新数据库记录
