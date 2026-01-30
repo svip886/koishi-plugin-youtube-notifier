@@ -47,13 +47,28 @@ export interface YoutubeStatus {
 async function getChannelStatus(ctx: Context, channelId: string, proxy?: string) {
   const logger = ctx.logger('youtube-notifier')
   logger.debug(`正在获取频道状态: ${channelId}`)
-  const browser = await puppeteer.launch({
-    executablePath: ctx.puppeteer.executable,
-    args: proxy ? [`--proxy-server=${proxy}`] : [],
-  })
-  const page = await browser.newPage()
   
+  let page: any
+  let browserToClose: any
+
   try {
+    if (proxy) {
+      // 如果配置了专用代理，则启动新浏览器实例
+      const executablePath = ctx.puppeteer.executable || (ctx.puppeteer as any).browser?.process()?.spawnfile
+      if (!executablePath) {
+        throw new Error('无法获取浏览器可执行路径。请确保 puppeteer 插件已正确启动并能找到浏览器。')
+      }
+      const browser = await puppeteer.launch({
+        executablePath,
+        args: [`--proxy-server=${proxy}`],
+      })
+      browserToClose = browser
+      page = await browser.newPage()
+    } else {
+      // 否则直接使用 puppeteer 服务提供的页面 (共享浏览器实例)
+      page = await ctx.puppeteer.page()
+    }
+
     // 检查社区帖子
     logger.debug(`正在检查社区帖子: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'networkidle2' })
@@ -83,7 +98,8 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
     throw e
   } finally {
-    await browser.close()
+    if (page) await page.close()
+    if (browserToClose) await browserToClose.close()
   }
 }
 
