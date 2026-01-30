@@ -45,6 +45,8 @@ export interface YoutubeStatus {
 }
 
 async function getChannelStatus(ctx: Context, channelId: string, proxy?: string) {
+  const logger = ctx.logger('youtube-notifier')
+  logger.debug(`正在获取频道状态: ${channelId}`)
   const browser = await puppeteer.launch({
     executablePath: ctx.puppeteer.executable,
     args: proxy ? [`--proxy-server=${proxy}`] : [],
@@ -53,6 +55,7 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
   
   try {
     // 检查社区帖子
+    logger.debug(`正在检查社区帖子: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'networkidle2' })
     const lastPostId = await page.evaluate(() => {
       const element = document.querySelector('ytd-backstage-post-thread-renderer')
@@ -60,6 +63,7 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     })
 
     // 检查直播状态
+    logger.debug(`正在检查直播状态: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'networkidle2' })
     const isLive = await page.evaluate(() => {
       return !!document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
@@ -73,7 +77,11 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
       })
     }
 
+    logger.debug(`频道 ${channelId} 状态获取成功: lastPostId=${lastPostId}, isLive=${isLive}, lastLiveId=${lastLiveId}`)
     return { lastPostId, isLive, lastLiveId }
+  } catch (e) {
+    logger.error(`频道 ${channelId} 状态获取失败:`, e)
+    throw e
   } finally {
     await browser.close()
   }
@@ -104,13 +112,14 @@ export function apply(ctx: Context, config: Config) {
     }
 
     const timer = setInterval(async () => {
+      const logger = ctx.logger('youtube-notifier')
       for (const channelConfig of config.channels) {
         try {
           const current = await getChannelStatus(ctx, channelConfig.id, config.proxy)
           const [saved] = await ctx.database.get('youtube_status', { id: channelConfig.id })
 
           if (!saved) {
-            // 初次运行，仅保存当前状态不推送
+            logger.info(`首次监控频道 ${channelConfig.id}，正在初始化数据`)
             await ctx.database.create('youtube_status', {
               id: channelConfig.id,
               ...current
@@ -118,8 +127,11 @@ export function apply(ctx: Context, config: Config) {
             continue
           }
 
+          logger.debug(`频道 ${channelConfig.id} 对比: 当前(isLive=${current.isLive}, liveId=${current.lastLiveId}), 缓存(isLive=${saved.isLive}, liveId=${saved.lastLiveId})`)
+
           // 新动态提醒
           if (current.lastPostId && current.lastPostId !== saved.lastPostId) {
+            logger.info(`检测到频道 ${channelConfig.id} 新动态: ${current.lastPostId}`)
             const title = `YouTube 新动态`
             const content = `频道 ${channelConfig.id} 发布了新动态：https://www.youtube.com/post/${current.lastPostId}`
             
@@ -140,6 +152,7 @@ export function apply(ctx: Context, config: Config) {
 
           // 开播状态变更提醒
           if (current.isLive && (!saved.isLive || current.lastLiveId !== saved.lastLiveId)) {
+            logger.info(`检测到频道 ${channelConfig.id} 正在直播: ${current.lastLiveId}`)
             const title = `YouTube 开播提醒`
             const content = `频道 ${channelConfig.id} 正在直播！\n传送门：https://www.youtube.com/watch?v=${current.lastLiveId}`
 
@@ -161,7 +174,7 @@ export function apply(ctx: Context, config: Config) {
           // 更新数据库记录
           await ctx.database.set('youtube_status', channelConfig.id, current)
         } catch (e) {
-          ctx.logger('youtube-notifier').error(`检查频道 ${channelConfig.id} 失败:`, e)
+          logger.error(`检查频道 ${channelConfig.id} 失败:`, e)
         }
       }
     }, config.interval)

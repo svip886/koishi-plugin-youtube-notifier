@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "YouTube channel post and live notifier for Koishi",
   "type": "commonjs",
   "main": "lib/index.js",
