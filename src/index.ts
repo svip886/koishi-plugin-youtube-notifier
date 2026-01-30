@@ -202,18 +202,26 @@ export function apply(ctx: Context, config: Config) {
             const content = `频道 ${channelConfig.id} 发布了新动态：https://www.youtube.com/post/${current.lastPostId}`
             
             if (ctx.notifier) {
-              for (const target of channelConfig.targets) {
+              for (let target of channelConfig.targets) {
+                // 如果是纯数字且没有前缀，针对 onebot 尝试自动补全
+                if (/^\d+$/.test(target)) {
+                  target = `onebot:${target}`
+                }
                 logger.info(`正在通过 notifier 推送至: ${target}`)
-                await ctx.notifier.create({
-                  title,
-                  content,
-                  target,
-                }).catch(e => logger.error(`Notifier 推送失败 [${target}]:`, e))
+                try {
+                  await ctx.notifier.create({ title, content, target })
+                } catch (e) {
+                  logger.error(`Notifier 推送失败 [${target}]:`, e)
+                }
               }
             } else {
-              logger.info(`正在通过广播推送至: ${channelConfig.targets.join(', ')}`)
-              await ctx.broadcast(channelConfig.targets, `[${title}]\n${content}`)
-                .catch(e => logger.error(`广播推送失败:`, e))
+              const targets = channelConfig.targets.map(t => /^\d+$/.test(t) ? `onebot:${t}` : t)
+              logger.info(`正在通过广播推送至: ${targets.join(', ')}`)
+              try {
+                await ctx.broadcast(targets, `[${title}]\n${content}`)
+              } catch (e) {
+                logger.error(`广播推送失败:`, e)
+              }
             }
           }
 
@@ -224,18 +232,25 @@ export function apply(ctx: Context, config: Config) {
             const content = `频道 ${channelConfig.id} 正在直播！\n传送门：https://www.youtube.com/watch?v=${current.lastLiveId}`
 
             if (ctx.notifier) {
-              for (const target of channelConfig.targets) {
+              for (let target of channelConfig.targets) {
+                if (/^\d+$/.test(target)) {
+                  target = `onebot:${target}`
+                }
                 logger.info(`正在通过 notifier 推送至: ${target}`)
-                await ctx.notifier.create({
-                  title,
-                  content,
-                  target,
-                }).catch(e => logger.error(`Notifier 推送失败 [${target}]:`, e))
+                try {
+                  await ctx.notifier.create({ title, content, target })
+                } catch (e) {
+                  logger.error(`Notifier 推送失败 [${target}]:`, e)
+                }
               }
             } else {
-              logger.info(`正在通过广播推送至: ${channelConfig.targets.join(', ')}`)
-              await ctx.broadcast(channelConfig.targets, `[${title}]\n${content}`)
-                .catch(e => logger.error(`广播推送失败:`, e))
+              const targets = channelConfig.targets.map(t => /^\d+$/.test(t) ? `onebot:${t}` : t)
+              logger.info(`正在通过广播推送至: ${targets.join(', ')}`)
+              try {
+                await ctx.broadcast(targets, `[${title}]\n${content}`)
+              } catch (e) {
+                logger.error(`广播推送失败:`, e)
+              }
             }
           }
 
