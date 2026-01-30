@@ -78,7 +78,7 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
       const browser = await puppeteer.launch({ 
         executablePath, 
         args,
-        protocolTimeout: 60000, 
+        protocolTimeout: 20000, 
       })
       browserToClose = browser
       page = await browser.newPage()
@@ -87,14 +87,14 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     }
 
     // 设置全局超时
-    page.setDefaultNavigationTimeout(60000)
-    page.setDefaultTimeout(60000)
+    page.setDefaultNavigationTimeout(20000)
+    page.setDefaultTimeout(20000)
 
     // 检查社区帖子
     logger.debug(`正在检查社区帖子: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'domcontentloaded' })
     try {
-      await page.waitForSelector('ytd-backstage-post-thread-renderer', { timeout: 10000 })
+      await page.waitForSelector('ytd-backstage-post-thread-renderer', { timeout: 3000 })
     } catch (e) {
       logger.debug(`频道 ${channelId} 社区页面未发现帖子或加载超时`)
     }
@@ -106,7 +106,6 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     // 检查直播状态
     logger.debug(`正在检查直播状态: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'domcontentloaded' })
-    // 直播页面通常会重定向或包含特定 meta
     const isLive = await page.evaluate(() => {
       return !!document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
     })
@@ -119,7 +118,7 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
       })
     }
 
-    logger.debug(`频道 ${channelId} 状态获取成功: lastPostId=${lastPostId}, isLive=${isLive}, lastLiveId=${lastLiveId}`)
+    logger.info(`频道 ${channelId} 状态获取成功: PostId=${lastPostId || '无'}, IsLive=${isLive}`)
     return { lastPostId, isLive, lastLiveId }
   } catch (e) {
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
@@ -166,6 +165,7 @@ export function apply(ctx: Context, config: Config) {
     }
 
     const check = async () => {
+      const startTime = Date.now()
       logger.debug('开始执行轮询检查...')
       for (const channelConfig of config.channels) {
         try {
@@ -231,6 +231,7 @@ export function apply(ctx: Context, config: Config) {
           logger.error(`检查频道 ${channelConfig.id} 失败:`, e)
         }
       }
+      logger.debug(`轮询检查完成，耗时 ${Date.now() - startTime}ms`)
     }
 
     // 立即执行一次
