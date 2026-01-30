@@ -1,14 +1,9 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "YouTube channel post and live notifier for Koishi",
   "main": "dist/index.js",
-  "typings": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "src",
-    "README.md"
-  ],
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc"
   },
@@ -18,6 +13,21 @@
     "youtube",
     "notifier",
     "puppeteer"
+  ],
+  "author": "Qoder",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/svip886/koishi-plugin-youtube-notifier.git"
+  },
+  "bugs": {
+    "url": "https://github.com/svip886/koishi-plugin-youtube-notifier/issues"
+  },
+  "homepage": "https://github.com/svip886/koishi-plugin-youtube-notifier#readme",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
   ],
   "koishi": {
     "description": {
@@ -33,11 +43,15 @@
       ]
     }
   },
-  "license": "MIT",
   "dependencies": {
     "koishi-plugin-puppeteer": "^3.0.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
+    "koishi": "^4.17.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
     "koishi": "^4.17.0"
   }
 }
