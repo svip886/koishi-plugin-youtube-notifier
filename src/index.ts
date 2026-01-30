@@ -98,6 +98,8 @@ export function apply(ctx: Context, config: Config) {
   })
 
   ctx.on('ready', async () => {
+    const logger = ctx.logger('youtube-notifier')
+
     // 代理可用性检测
     if (config.proxy) {
       try {
@@ -105,14 +107,19 @@ export function apply(ctx: Context, config: Config) {
           proxyAgent: config.proxy,
           timeout: 10000,
         })
-        ctx.logger('youtube-notifier').info(`代理检测成功: ${config.proxy}`)
+        logger.info(`代理检测成功: ${config.proxy}`)
       } catch (e) {
-        ctx.logger('youtube-notifier').warn(`代理检测失败: ${config.proxy}, 请检查代理配置或网络环境`)
+        logger.warn(`代理检测失败: ${config.proxy}, 请检查代理配置或网络环境`)
       }
     }
 
-    const timer = setInterval(async () => {
-      const logger = ctx.logger('youtube-notifier')
+    if (!config.channels.length) {
+      logger.warn('未配置任何订阅频道，监控任务未启动。')
+      return
+    }
+
+    const check = async () => {
+      logger.debug('开始执行轮询检查...')
       for (const channelConfig of config.channels) {
         try {
           const current = await getChannelStatus(ctx, channelConfig.id, config.proxy)
@@ -177,8 +184,17 @@ export function apply(ctx: Context, config: Config) {
           logger.error(`检查频道 ${channelConfig.id} 失败:`, e)
         }
       }
-    }, config.interval)
+    }
 
-    ctx.on('dispose', () => clearInterval(timer))
+    // 立即执行一次
+    logger.info(`已启动监控任务，订阅频道数量: ${config.channels.length}，轮询间隔: ${config.interval}ms`)
+    check()
+
+    const timer = setInterval(check, config.interval)
+
+    ctx.on('dispose', () => {
+      logger.info('正在停止监控任务...')
+      clearInterval(timer)
+    })
   })
 }
