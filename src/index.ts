@@ -62,8 +62,14 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
       if (process.getuid?.() === 0) {
         args.push('--no-sandbox', '--disable-setuid-sandbox')
       }
+      // 优化容器/资源受限环境下的启动
+      args.push('--disable-dev-shm-usage', '--disable-gpu')
 
-      const browser = await puppeteer.launch({ executablePath, args })
+      const browser = await puppeteer.launch({ 
+        executablePath, 
+        args,
+        protocolTimeout: 60000, // 增加协议通信超时时间
+      })
       browserToClose = browser
       page = await browser.newPage()
     } else {

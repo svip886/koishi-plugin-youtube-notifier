@@ -41,6 +41,10 @@ MIT License.
 
 ## 更新日志
 
+### 1.1.5
+
+- **修复**：增加了 `protocolTimeout` 通信超时时间，并禁用了 GPU 和 `/dev/shm` 使用，修复了在某些受限环境下（如 Docker）启动浏览器时出现的 `ProtocolError` 问题。
+
 ### 1.1.4
 
 - **优化**：将页面加载等待策略从 `networkidle2` 改为 `domcontentloaded`，并增加了超时重试与资源自动释放逻辑，显著提升了在网络环境较差时的稳定性。
