@@ -41,6 +41,10 @@ MIT License.
 
 ## 更新日志
 
+### 1.0.6
+
+- **回退**：将项目回退为 CommonJS 模式，以解决部分环境下的 `ERR_REQUIRE_ESM` 加载错误。
+
 ### 1.0.5
 
 - **重要更新**：项目切换为 ESM (ECMAScript Module) 模式。
