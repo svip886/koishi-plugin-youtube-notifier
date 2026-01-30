@@ -1,9 +1,10 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "YouTube channel post and live notifier for Koishi",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc"
   },
@@ -26,7 +27,6 @@
   "homepage": "https://github.com/svip886/koishi-plugin-youtube-notifier#readme",
   "files": [
     "dist",
-    "src",
     "README.md"
   ],
   "koishi": {

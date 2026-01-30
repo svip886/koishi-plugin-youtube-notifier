@@ -1,5 +1,7 @@
 import { Context, Schema, Service, h } from 'koishi'
-import { Puppeteer } from 'koishi-plugin-puppeteer'
+import Puppeteer from 'koishi-plugin-puppeteer'
+import puppeteer from 'puppeteer-core'
+import {} from '@koishijs/plugin-proxy-agent'
 
 export const name = 'youtube-notifier'
 export const inject = {
@@ -43,7 +45,8 @@ export interface YoutubeStatus {
 }
 
 async function getChannelStatus(ctx: Context, channelId: string, proxy?: string) {
-  const browser = await ctx.puppeteer.launch({
+  const browser = await puppeteer.launch({
+    executablePath: ctx.puppeteer.executable,
     args: proxy ? [`--proxy-server=${proxy}`] : [],
   })
   const page = await browser.newPage()
@@ -91,7 +94,7 @@ export function apply(ctx: Context, config: Config) {
     if (config.proxy) {
       try {
         await ctx.http.get('https://www.youtube.com', {
-          proxy: config.proxy,
+          proxyAgent: config.proxy,
           timeout: 10000,
         })
         ctx.logger('youtube-notifier').info(`代理检测成功: ${config.proxy}`)

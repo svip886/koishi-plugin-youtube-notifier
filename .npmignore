@@ -1,0 +1,25 @@
+# Source files
+tsconfig.json
+
+# Test files
+test/
+*.test.ts
+*.spec.ts
+
+# Documentation and config
+.qoder/
+.vscode/
+.idea/
+.gitignore
+.editorconfig
+.prettierrc
+.eslintrc*
+
+# Build tools and logs
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+# Temp files
+.temp/
+tmp/

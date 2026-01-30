@@ -41,6 +41,14 @@ MIT License.
 
 ## 更新日志
 
+### 1.0.5
+
+- **重要更新**：项目切换为 ESM (ECMAScript Module) 模式。
+- **修复**：修正了 Puppeteer 浏览器启动逻辑，支持正确的 `executablePath` 获取。
+- **修复**：修正了 HTTP 代理配置属性名为 `proxyAgent`。
+- **优化**：优化了 npm 发布包体积，移除了不必要的源码、配置和缓存文件。
+- **安全**：移除了仓库中的 `package-lock.json`。
+
 ### 1.0.0
 
 - 初始版本发布。
