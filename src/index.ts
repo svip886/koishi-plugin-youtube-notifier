@@ -106,19 +106,31 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     // 检查直播状态
     logger.debug(`正在检查直播状态: ${channelId}`)
     await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'domcontentloaded' })
-    const isLive = await page.evaluate(() => {
-      return !!document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
+    
+    // 处理可能出现的 Cookie 同意弹窗
+    try {
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        const consentButton = buttons.find(b => b.innerText.includes('Accept all') || b.innerText.includes('全部接受'))
+        consentButton?.click()
+      })
+    } catch (e) {}
+
+    const liveInfo = await page.evaluate(() => {
+      const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href') || window.location.href
+      const isWatchPage = canonical.includes('watch?v=')
+      const isLiveMeta = document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
+      const videoId = canonical.split('v=')[1]?.split('&')[0] || ''
+      
+      return {
+        isLive: !!isLiveMeta || (isWatchPage && !!videoId),
+        lastLiveId: videoId,
+        url: window.location.href
+      }
     })
     
-    let lastLiveId = ''
-    if (isLive) {
-      lastLiveId = await page.evaluate(() => {
-        const link = document.querySelector('link[rel="canonical"]')
-        return link?.getAttribute('href')?.split('v=')[1] || ''
-      })
-    }
-
-    logger.info(`频道 ${channelId} 状态获取成功: PostId=${lastPostId || '无'}, IsLive=${isLive}`)
+    const { isLive, lastLiveId } = liveInfo
+    logger.info(`频道 ${channelId} 状态获取成功: PostId=${lastPostId || '无'}, IsLive=${isLive}, URL=${liveInfo.url}`)
     return { lastPostId, isLive, lastLiveId }
   } catch (e) {
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
