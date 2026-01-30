@@ -41,6 +41,10 @@ MIT License.
 
 ## 更新日志
 
+### 1.0.7
+
+- **修复**：显式声明 `"type": "commonjs"` 以彻底解决 ESM 加载冲突。
+
 ### 1.0.6
 
 - **回退**：将项目回退为 CommonJS 模式，以解决部分环境下的 `ERR_REQUIRE_ESM` 加载错误。
