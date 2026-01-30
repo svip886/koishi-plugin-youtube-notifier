@@ -41,6 +41,10 @@ MIT License.
 
 ## 更新日志
 
+### 1.0.8
+
+- **修复**：迁移编译目录至 `lib`，显式声明 `type: commonjs` 并使用 `typings` 字段，完全匹配 Koishi 官方插件标准结构以彻底解决 ESM 加载冲突。
+
 ### 1.0.7
 
 - **修复**：显式声明 `"type": "commonjs"` 以彻底解决 ESM 加载冲突。
