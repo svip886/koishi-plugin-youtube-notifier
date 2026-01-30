@@ -203,16 +203,17 @@ export function apply(ctx: Context, config: Config) {
             
             if (ctx.notifier) {
               for (const target of channelConfig.targets) {
+                logger.info(`正在通过 notifier 推送至: ${target}`)
                 await ctx.notifier.create({
                   title,
                   content,
                   target,
-                })
+                }).catch(e => logger.error(`Notifier 推送失败 [${target}]:`, e))
               }
             } else {
-              for (const target of channelConfig.targets) {
-                ctx.broadcast([target], `[${title}] ${content}`)
-              }
+              logger.info(`正在通过广播推送至: ${channelConfig.targets.join(', ')}`)
+              await ctx.broadcast(channelConfig.targets, `[${title}]\n${content}`)
+                .catch(e => logger.error(`广播推送失败:`, e))
             }
           }
 
@@ -224,16 +225,17 @@ export function apply(ctx: Context, config: Config) {
 
             if (ctx.notifier) {
               for (const target of channelConfig.targets) {
+                logger.info(`正在通过 notifier 推送至: ${target}`)
                 await ctx.notifier.create({
                   title,
                   content,
                   target,
-                })
+                }).catch(e => logger.error(`Notifier 推送失败 [${target}]:`, e))
               }
             } else {
-              for (const target of channelConfig.targets) {
-                ctx.broadcast([target], `[${title}] ${content}`)
-              }
+              logger.info(`正在通过广播推送至: ${channelConfig.targets.join(', ')}`)
+              await ctx.broadcast(channelConfig.targets, `[${title}]\n${content}`)
+                .catch(e => logger.error(`广播推送失败:`, e))
             }
           }
 
