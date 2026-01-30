@@ -47,14 +47,8 @@ export interface YoutubeStatus {
 async function getChannelStatus(ctx: Context, channelId: string, proxy?: string) {
   const logger = ctx.logger('youtube-notifier')
   logger.debug(`正在获取频道状态: ${channelId}`)
-  
-  const executablePath = ctx.puppeteer.executable
-  if (!executablePath) {
-    throw new Error('未找到有效的浏览器可执行路径，请确保已安装 Chromium 或在 puppeteer 插件中正确配置。')
-  }
-
   const browser = await puppeteer.launch({
-    executablePath,
+    executablePath: ctx.puppeteer.executable,
     args: proxy ? [`--proxy-server=${proxy}`] : [],
   })
   const page = await browser.newPage()
