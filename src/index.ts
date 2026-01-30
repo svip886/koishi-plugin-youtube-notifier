@@ -53,22 +53,32 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
 
   try {
     if (proxy) {
+      logger.info(`正在启动专用浏览器实例，应用代理: ${proxy}`)
       const executablePath = ctx.puppeteer.executable || (ctx.puppeteer as any).browser?.process()?.spawnfile
       if (!executablePath) {
         throw new Error('无法获取浏览器可执行路径。')
       }
       
-      const args = [`--proxy-server=${proxy}`]
+      const args = [
+        `--proxy-server=${proxy}`,
+        '--proxy-bypass-list=<-loopback>', // 强制所有流量走代理
+        '--disable-extensions',
+        '--disable-component-update',
+        '--no-first-run',
+        '--no-default-browser-check',
+      ]
       if (process.getuid?.() === 0) {
         args.push('--no-sandbox', '--disable-setuid-sandbox')
       }
       // 优化容器/资源受限环境下的启动
       args.push('--disable-dev-shm-usage', '--disable-gpu')
 
+      logger.debug(`浏览器启动参数: ${args.join(' ')}`)
+
       const browser = await puppeteer.launch({ 
         executablePath, 
         args,
-        protocolTimeout: 60000, // 增加协议通信超时时间
+        protocolTimeout: 60000, 
       })
       browserToClose = browser
       page = await browser.newPage()
