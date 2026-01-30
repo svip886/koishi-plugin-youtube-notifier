@@ -53,10 +53,9 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
 
   try {
     if (proxy) {
-      // 如果配置了专用代理，则启动新浏览器实例
       const executablePath = ctx.puppeteer.executable || (ctx.puppeteer as any).browser?.process()?.spawnfile
       if (!executablePath) {
-        throw new Error('无法获取浏览器可执行路径。请确保 puppeteer 插件已正确启动并能找到浏览器。')
+        throw new Error('无法获取浏览器可执行路径。')
       }
       
       const args = [`--proxy-server=${proxy}`]
@@ -64,20 +63,25 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
         args.push('--no-sandbox', '--disable-setuid-sandbox')
       }
 
-      const browser = await puppeteer.launch({
-        executablePath,
-        args,
-      })
+      const browser = await puppeteer.launch({ executablePath, args })
       browserToClose = browser
       page = await browser.newPage()
     } else {
-      // 否则直接使用 puppeteer 服务提供的页面 (共享浏览器实例)
       page = await ctx.puppeteer.page()
     }
 
+    // 设置全局超时
+    page.setDefaultNavigationTimeout(60000)
+    page.setDefaultTimeout(60000)
+
     // 检查社区帖子
     logger.debug(`正在检查社区帖子: ${channelId}`)
-    await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'networkidle2' })
+    await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'domcontentloaded' })
+    try {
+      await page.waitForSelector('ytd-backstage-post-thread-renderer', { timeout: 10000 })
+    } catch (e) {
+      logger.debug(`频道 ${channelId} 社区页面未发现帖子或加载超时`)
+    }
     const lastPostId = await page.evaluate(() => {
       const element = document.querySelector('ytd-backstage-post-thread-renderer')
       return element?.getAttribute('id') || ''
@@ -85,7 +89,8 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
 
     // 检查直播状态
     logger.debug(`正在检查直播状态: ${channelId}`)
-    await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'networkidle2' })
+    await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'domcontentloaded' })
+    // 直播页面通常会重定向或包含特定 meta
     const isLive = await page.evaluate(() => {
       return !!document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
     })
@@ -104,8 +109,12 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
     throw e
   } finally {
-    if (page) await page.close()
-    if (browserToClose) await browserToClose.close()
+    if (page) {
+      try { await page.close() } catch (e) {}
+    }
+    if (browserToClose) {
+      try { await browserToClose.close() } catch (e) {}
+    }
   }
 }
 
