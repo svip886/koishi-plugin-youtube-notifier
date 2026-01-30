@@ -58,9 +58,15 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string)
       if (!executablePath) {
         throw new Error('无法获取浏览器可执行路径。请确保 puppeteer 插件已正确启动并能找到浏览器。')
       }
+      
+      const args = [`--proxy-server=${proxy}`]
+      if (process.getuid?.() === 0) {
+        args.push('--no-sandbox', '--disable-setuid-sandbox')
+      }
+
       const browser = await puppeteer.launch({
         executablePath,
-        args: [`--proxy-server=${proxy}`],
+        args,
       })
       browserToClose = browser
       page = await browser.newPage()
