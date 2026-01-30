@@ -87,6 +87,19 @@ export function apply(ctx: Context, config: Config) {
   })
 
   ctx.on('ready', async () => {
+    // 代理可用性检测
+    if (config.proxy) {
+      try {
+        await ctx.http.get('https://www.youtube.com', {
+          proxy: config.proxy,
+          timeout: 10000,
+        })
+        ctx.logger('youtube-notifier').info(`代理检测成功: ${config.proxy}`)
+      } catch (e) {
+        ctx.logger('youtube-notifier').warn(`代理检测失败: ${config.proxy}, 请检查代理配置或网络环境`)
+      }
+    }
+
     const timer = setInterval(async () => {
       for (const channelConfig of config.channels) {
         try {
