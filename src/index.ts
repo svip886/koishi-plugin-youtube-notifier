@@ -1,11 +1,9 @@
-import { Context, Schema, Service, h } from 'koishi'
-import Puppeteer from 'koishi-plugin-puppeteer'
-import puppeteer from 'puppeteer-core'
+import { Context, Schema } from 'koishi'
 import {} from '@koishijs/plugin-proxy-agent'
 
 export const name = 'youtube-notifier'
 export const inject = {
-  required: ['puppeteer', 'database'],
+  required: ['database'],
   optional: ['notifier'],
 }
 
@@ -13,6 +11,7 @@ export interface Config {
   channels: { id: string; targets: string[] }[]
   interval: number
   proxy?: string
+  cookie?: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -20,8 +19,9 @@ export const Config: Schema<Config> = Schema.object({
     id: Schema.string().required().description('YouTube 频道 ID (例如 UC-hM6YJuNYV19LAJg37K9Bw)'),
     targets: Schema.array(Schema.string()).description('推送目标群组 ID'),
   })).description('订阅频道列表'),
-  interval: Schema.number().default(300000).description('轮询间隔 (毫秒)'),
-  proxy: Schema.string().description('代理服务器地址 (例如 http://127.0.0.1:7890)'),
+  interval: Schema.number().default(60000).description('轮询间隔 (毫秒)'),
+  proxy: Schema.string().description('代理服务器地址 (例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080)'),
+  cookie: Schema.string().description('YouTube Cookie (可选，用于提高稳定性)'),
 })
 
 declare module 'koishi' {
@@ -39,117 +39,92 @@ export interface Notifier {
 
 export interface YoutubeStatus {
   id: string
-  lastPostId: string
   lastLiveId: string
+  title: string
+  author: string
   isLive: boolean
 }
 
-async function getChannelStatus(ctx: Context, channelId: string, proxy?: string) {
+interface YoutubeResponse {
+  videoDetails?: {
+    title?: string
+    author?: string
+    viewCount?: string
+    shortDescription?: string
+  }
+  liveStreamingDetails?: {
+    actualStartTime?: string
+    concurrentViewers?: string
+  }
+  streamingData?: {
+    hlsManifestUrl?: string
+    formats?: any[]
+  }
+}
+
+interface ChannelStatus {
+  isLive: boolean
+  title: string
+  author: string
+  viewCount: string
+  lastLiveId: string
+}
+
+async function getChannelStatus(ctx: Context, channelId: string, proxy?: string, cookie?: string): Promise<ChannelStatus> {
   const logger = ctx.logger('youtube-notifier')
   logger.debug(`正在获取频道状态: ${channelId}`)
-  
-  let page: any
-  let browserToClose: any
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  }
+  if (cookie) headers['cookie'] = cookie
 
   try {
-    if (proxy) {
-      logger.info(`正在启动专用浏览器实例，应用代理: ${proxy}`)
-      const executablePath = ctx.puppeteer.executable || (ctx.puppeteer as any).browser?.process()?.spawnfile
-      if (!executablePath) {
-        throw new Error('无法获取浏览器可执行路径。')
-      }
-      
-      const args = [
-        `--proxy-server=${proxy}`,
-        '--proxy-bypass-list=<-loopback>', // 强制所有流量走代理
-        '--disable-extensions',
-        '--disable-component-update',
-        '--no-first-run',
-        '--no-default-browser-check',
-      ]
-      if (process.getuid?.() === 0) {
-        args.push('--no-sandbox', '--disable-setuid-sandbox')
-      }
-      // 优化容器/资源受限环境下的启动
-      args.push('--disable-dev-shm-usage', '--disable-gpu')
+    const requestOptions: any = {
+      headers,
+      timeout: 20000,
+    }
+    if (proxy) requestOptions.proxyAgent = proxy
 
-      logger.debug(`浏览器启动参数: ${args.join(' ')}`)
+    const htmlContent = await ctx.http.get(`https://www.youtube.com/channel/${channelId}/live`, requestOptions)
 
-      const browser = await puppeteer.launch({ 
-        executablePath, 
-        args,
-        protocolTimeout: 20000, 
-      })
-      browserToClose = browser
-      page = await browser.newPage()
-    } else {
-      page = await ctx.puppeteer.page()
+    // 提取 ytInitialPlayerResponse 对象
+    const match = htmlContent.match(/var ytInitialPlayerResponse = \{[^}]+\}/)
+    if (!match) {
+      logger.debug(`频道 ${channelId} 未找到 ytInitialPlayerResponse，可能不在直播`)
+      return { isLive: false, title: '', author: '', viewCount: '', lastLiveId: '' }
     }
 
-    // 设置全局超时
-    page.setDefaultNavigationTimeout(20000)
-    page.setDefaultTimeout(20000)
+    const jsonStr = match[0].replace('var ytInitialPlayerResponse = ', '')
+    const data: YoutubeResponse = JSON.parse(jsonStr)
 
-    // 检查社区帖子
-    logger.debug(`正在检查社区帖子: ${channelId}`)
-    await page.goto(`https://www.youtube.com/channel/${channelId}/community`, { waitUntil: 'domcontentloaded' })
-    try {
-      await page.waitForSelector('ytd-backstage-post-thread-renderer', { timeout: 3000 })
-    } catch (e) {
-      logger.debug(`频道 ${channelId} 社区页面未发现帖子或加载超时`)
+    const isLive = !!(data.streamingData?.hlsManifestUrl || data.liveStreamingDetails?.actualStartTime)
+    
+    // 获取视频ID（如果能从URL中解析）
+    const canonicalMatch = htmlContent.match(/link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)"/)
+    const lastLiveId = canonicalMatch ? canonicalMatch[1] : ''
+
+    logger.info(`频道 ${channelId} 状态: isLive=${isLive}, title=${data.videoDetails?.title || ''}`)
+    
+    return {
+      isLive,
+      title: data.videoDetails?.title || '',
+      author: data.videoDetails?.author || '',
+      viewCount: data.videoDetails?.viewCount || '',
+      lastLiveId
     }
-    const lastPostId = await page.evaluate(() => {
-      const element = document.querySelector('ytd-backstage-post-thread-renderer')
-      return element?.getAttribute('id') || ''
-    })
-
-    // 检查直播状态
-    logger.debug(`正在检查直播状态: ${channelId}`)
-    await page.goto(`https://www.youtube.com/channel/${channelId}/live`, { waitUntil: 'domcontentloaded' })
-    
-    // 处理可能出现的 Cookie 同意弹窗
-    try {
-      await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'))
-        const consentButton = buttons.find(b => b.innerText.includes('Accept all') || b.innerText.includes('全部接受'))
-        consentButton?.click()
-      })
-    } catch (e) {}
-
-    const liveInfo = await page.evaluate(() => {
-      const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href') || window.location.href
-      const isWatchPage = canonical.includes('watch?v=')
-      const isLiveMeta = document.querySelector('meta[itemprop="isLiveBroadcast"][content="True"]')
-      const videoId = canonical.split('v=')[1]?.split('&')[0] || ''
-      
-      return {
-        isLive: !!isLiveMeta || (isWatchPage && !!videoId),
-        lastLiveId: videoId,
-        url: window.location.href
-      }
-    })
-    
-    const { isLive, lastLiveId } = liveInfo
-    logger.info(`频道 ${channelId} 状态获取成功: PostId=${lastPostId || '无'}, IsLive=${isLive}, URL=${liveInfo.url}`)
-    return { lastPostId, isLive, lastLiveId }
   } catch (e) {
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
     throw e
-  } finally {
-    if (page) {
-      try { await page.close() } catch (e) {}
-    }
-    if (browserToClose) {
-      try { await browserToClose.close() } catch (e) {}
-    }
   }
 }
 
 export function apply(ctx: Context, config: Config) {
   ctx.model.extend('youtube_status', {
     id: 'string',
-    lastPostId: 'string',
     lastLiveId: 'string',
+    title: 'string',
+    author: 'string',
     isLive: 'boolean',
   }, {
     primary: 'id',
@@ -233,28 +208,36 @@ export function apply(ctx: Context, config: Config) {
 
           logger.debug(`频道 ${channelConfig.id} 对比: 当前(isLive=${current.isLive}, liveId=${current.lastLiveId}), 缓存(isLive=${saved.isLive}, liveId=${saved.lastLiveId})`)
 
-          // 新动态提醒
-          if (current.lastPostId && current.lastPostId !== saved.lastPostId) {
-            logger.info(`检测到频道 ${channelConfig.id} 新动态: ${current.lastPostId}`)
-            await sendMessage(
-              channelConfig.targets, 
-              'YouTube 新动态', 
-              `频道 ${channelConfig.id} 发布了新动态：https://www.youtube.com/post/${current.lastPostId}`
-            )
-          }
-
           // 开播状态变更提醒
           if (current.isLive && (!saved.isLive || current.lastLiveId !== saved.lastLiveId)) {
             logger.info(`检测到频道 ${channelConfig.id} 正在直播: ${current.lastLiveId}`)
+            const content = `主播: ${current.author}\n标题: ${current.title}\n观看人数: ${current.viewCount}\n传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
             await sendMessage(
               channelConfig.targets,
-              'YouTube 开播提醒',
-              `频道 ${channelConfig.id} 正在直播！\n传送门：https://www.youtube.com/watch?v=${current.lastLiveId}`
+              `YouTube 开播提醒 - ${current.author}`,
+              content
+            )
+          }
+
+          // 标题更新提醒 (开播时)
+          if (current.isLive && current.title && current.title !== saved.title) {
+            logger.info(`检测到频道 ${channelConfig.id} 标题变更: ${current.title}`)
+            const content = `新标题: ${current.title}\n观看人数: ${current.viewCount}\n传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
+            await sendMessage(
+              channelConfig.targets,
+              `YouTube 直播更新 - ${current.author}`,
+              content
             )
           }
 
           // 更新数据库记录
-          await ctx.database.set('youtube_status', channelConfig.id, current)
+          await ctx.database.set('youtube_status', channelConfig.id, {
+            id: channelConfig.id,
+            lastLiveId: current.lastLiveId,
+            title: current.title,
+            author: current.author,
+            isLive: current.isLive
+          })
         } catch (e) {
           logger.error(`检查频道 ${channelConfig.id} 失败:`, e)
         }

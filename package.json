@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "1.2.1",
-  "description": "YouTube channel post and live notifier for Koishi",
+  "version": "2.0.0",
+  "description": "YouTube channel live notifier for Koishi - lightweight HTTP solution",
   "type": "commonjs",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
@@ -13,7 +13,7 @@
     "plugin",
     "youtube",
     "notifier",
-    "puppeteer"
+    "live"
   ],
   "author": "Qoder",
   "license": "MIT",
@@ -31,11 +31,10 @@
   ],
   "koishi": {
     "description": {
-      "zh": "YouTube 频道动态与直播开播提醒"
+      "zh": "YouTube 频道直播开播提醒 - 轻量级方案"
     },
     "service": {
       "required": [
-        "puppeteer",
         "database"
       ],
       "optional": [
@@ -44,7 +43,6 @@
     }
   },
   "dependencies": {
-    "koishi-plugin-puppeteer": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
