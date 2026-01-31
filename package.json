@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-youtube-notifier",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "YouTube channel live notifier for Koishi - lightweight HTTP solution",
   "type": "commonjs",
   "main": "lib/index.js",
@@ -43,6 +43,8 @@
     }
   },
   "dependencies": {
+    "axios": "^1.13.4",
+    "socks-proxy-agent": "^8.0.5"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -1,4 +1,5 @@
 import { Context, Schema } from 'koishi'
+import { SocksProxyAgent } from 'socks-proxy-agent'
 import {} from '@koishijs/plugin-proxy-agent'
 
 export const name = 'youtube-notifier'
@@ -51,6 +52,8 @@ interface YoutubeResponse {
     author?: string
     viewCount?: string
     shortDescription?: string
+    isLive?: boolean
+    videoId?: string
   }
   liveStreamingDetails?: {
     actualStartTime?: string
@@ -84,34 +87,49 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string,
       headers,
       timeout: 20000,
     }
-    if (proxy) requestOptions.proxyAgent = proxy
+    
+    // 使用 socks-proxy-agent 处理 SOCKS5 代理
+    if (proxy) {
+      if (proxy.startsWith('socks5://') || proxy.startsWith('socks://') || proxy.startsWith('socks4://')) {
+        const agent = new SocksProxyAgent(proxy)
+        requestOptions.httpAgent = agent
+        requestOptions.httpsAgent = agent
+      } else {
+        // HTTP 代理
+        requestOptions.proxyAgent = proxy
+      }
+    }
 
     const htmlContent = await ctx.http.get(`https://www.youtube.com/channel/${channelId}/live`, requestOptions)
 
     // 提取 ytInitialPlayerResponse 对象
-    const match = htmlContent.match(/var ytInitialPlayerResponse = \{[^}]+\}/)
+    const match = htmlContent.match(/var ytInitialPlayerResponse\s*=\{([\s\S]*?)\};/m)
     if (!match) {
       logger.debug(`频道 ${channelId} 未找到 ytInitialPlayerResponse，可能不在直播`)
       return { isLive: false, title: '', author: '', viewCount: '', lastLiveId: '' }
     }
 
-    const jsonStr = match[0].replace('var ytInitialPlayerResponse = ', '')
-    const data: YoutubeResponse = JSON.parse(jsonStr)
+    try {
+      const data: YoutubeResponse = JSON.parse(`{${match[1]}}`)
+      
+      const isLive = data.videoDetails?.isLive === true || !!(data.streamingData?.hlsManifestUrl)
+      
+      // 获取视频ID
+      const canonicalMatch = htmlContent.match(/link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^ "]+)"/)
+      const lastLiveId = canonicalMatch ? canonicalMatch[1] : data.videoDetails?.videoId || ''
 
-    const isLive = !!(data.streamingData?.hlsManifestUrl || data.liveStreamingDetails?.actualStartTime)
-    
-    // 获取视频ID（如果能从URL中解析）
-    const canonicalMatch = htmlContent.match(/link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)"/)
-    const lastLiveId = canonicalMatch ? canonicalMatch[1] : ''
-
-    logger.info(`频道 ${channelId} 状态: isLive=${isLive}, title=${data.videoDetails?.title || ''}`)
-    
-    return {
-      isLive,
-      title: data.videoDetails?.title || '',
-      author: data.videoDetails?.author || '',
-      viewCount: data.videoDetails?.viewCount || '',
-      lastLiveId
+      logger.info(`频道 ${channelId} 状态: isLive=${isLive}, title=${data.videoDetails?.title || ''}`)
+      
+      return {
+        isLive,
+        title: data.videoDetails?.title || '',
+        author: data.videoDetails?.author || '',
+        viewCount: data.videoDetails?.viewCount || '',
+        lastLiveId
+      }
+    } catch (e) {
+      logger.debug(`频道 ${channelId} JSON 解析失败，可能不在直播`)
+      return { isLive: false, title: '', author: '', viewCount: '', lastLiveId: '' }
     }
   } catch (e) {
     logger.error(`频道 ${channelId} 状态获取失败:`, e)

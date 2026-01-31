@@ -43,6 +43,12 @@ MIT License.
 
 ## 更新日志
 
+### 2.0.2
+
+- **修复**：使用 `socks-proxy-agent` 正确处理 SOCKS5 代理，解决协议不匹配问题
+- **优化**：改进正则表达式匹配逻辑，提高 JSON 解析成功率
+- **优化**：优先使用 `videoDetails.isLive` 判定直播状态，增加备用 videoId 获取方案
+
 ### 2.0.0
 
 - **重大重构**：移除 Puppeteer 依赖，改用轻量级 HTTP 方案
