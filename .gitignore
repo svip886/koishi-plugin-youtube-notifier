@@ -33,3 +33,5 @@ Thumbs.db
 .temp/
 tmp/
 temp_ref/
+
+test-*.mjs

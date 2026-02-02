@@ -1,6 +1,4 @@
 import { Context, Schema } from 'koishi'
-import { SocksProxyAgent } from 'socks-proxy-agent'
-import {} from '@koishijs/plugin-proxy-agent'
 
 export const name = 'youtube-notifier'
 export const inject = {
@@ -44,6 +42,9 @@ export interface YoutubeStatus {
   title: string
   author: string
   isLive: boolean
+  dateText: string
+  liveStartTime: number
+  lastReminderTime: number
 }
 
 interface YoutubeResponse {
@@ -63,19 +64,45 @@ interface YoutubeResponse {
     hlsManifestUrl?: string
     formats?: any[]
   }
+  dateText?: {
+    simpleText?: string
+  }
 }
 
 interface ChannelStatus {
   isLive: boolean
   title: string
   author: string
-  viewCount: string
   lastLiveId: string
+  dateText: string
+}
+
+// 格式化时间为详细日期格式（北京时间）
+function formatDateTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+// 格式化时间为24小时制（北京时间）
+function formatTime24(timestamp: number): string {
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+// 格式化时长（秒 -> 人类可读格式）
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}秒`
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (hours > 0) {
+    return `${hours}小时${minutes}分钟`
+  }
+  return `${minutes}分钟`
 }
 
 async function getChannelStatus(ctx: Context, channelId: string, proxy?: string, cookie?: string): Promise<ChannelStatus> {
   const logger = ctx.logger('youtube-notifier')
-  logger.debug(`正在获取频道状态: ${channelId}`)
+  logger.info(`开始获取频道状态: ${channelId}`)
 
   const headers: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -85,51 +112,99 @@ async function getChannelStatus(ctx: Context, channelId: string, proxy?: string,
   try {
     const requestOptions: any = {
       headers,
-      timeout: 20000,
+      timeout: 15000,
+    }
+
+    // 重试机制：最多重试2次
+    let htmlContent = ''
+    let retries = 0
+    const maxRetries = 2
+    while (retries < maxRetries) {
+      try {
+        logger.info(`请求 YouTube (第 ${retries + 1} 次)...`)
+        htmlContent = await ctx.http.get(`https://www.youtube.com/channel/${channelId}/live`, requestOptions)
+        logger.info(`请求成功，HTML 长度: ${htmlContent.length}`)
+        break
+      } catch (e) {
+        retries++
+        if (retries >= maxRetries) {
+          logger.warn(`频道 ${channelId} 请求失败: ${(e as any).message}`)
+          return { isLive: false, title: '', author: '', lastLiveId: '', dateText: '' }
+        }
+        logger.info(`第 ${retries} 次重试失败，等待 1 秒`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+
+    // 多重备选方案检测直播
+    logger.info(`使用多重备选方案检测直播...`)
+    
+    // 方案1: 查找 canonical videoId
+    const canonicalMatch = htmlContent.match(/link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^ "]+)"/)
+    const videoId = canonicalMatch ? canonicalMatch[1] : ''
+    
+    if (videoId) {
+      logger.info(`频道 ${channelId} 找到 videoId: ${videoId}`)
+    } else {
+      logger.info(`频道 ${channelId} 未找到 videoId，可能不在直播`)
+      return { isLive: false, title: '', author: '', lastLiveId: '', dateText: '' }
     }
     
-    // 使用 socks-proxy-agent 处理 SOCKS5 代理
-    if (proxy) {
-      if (proxy.startsWith('socks5://') || proxy.startsWith('socks://') || proxy.startsWith('socks4://')) {
-        const agent = new SocksProxyAgent(proxy)
-        requestOptions.httpAgent = agent
-        requestOptions.httpsAgent = agent
-      } else {
-        // HTTP 代理
-        requestOptions.proxyAgent = proxy
+    // 方案2: 查找 ytInitialPlayerResponse（如果存在）
+    let isLive = false
+    let title = ''
+    let author = ''
+    
+    const playerMatch = htmlContent.match(/var ytInitialPlayerResponse\s*=\s*\{([\s\S]*?)\};/m)
+    if (playerMatch) {
+      logger.info(`找到 ytInitialPlayerResponse，匹配长度: ${playerMatch[1].length}`)
+      try {
+        const data: YoutubeResponse = JSON.parse(`{${playerMatch[1]}}`)
+        isLive = data.videoDetails?.isLive === true || !!(data.streamingData?.hlsManifestUrl)
+        title = data.videoDetails?.title || ''
+        author = data.videoDetails?.author || ''
+        logger.info(`从 ytInitialPlayerResponse 提取: isLive=${isLive}, title=${title.substring(0, 30)}`)
+      } catch (e) {
+        logger.info(`ytInitialPlayerResponse JSON 解析失败: ${(e as any).message}`)
       }
     }
-
-    const htmlContent = await ctx.http.get(`https://www.youtube.com/channel/${channelId}/live`, requestOptions)
-
-    // 提取 ytInitialPlayerResponse 对象
-    const match = htmlContent.match(/var ytInitialPlayerResponse\s*=\{([\s\S]*?)\};/m)
-    if (!match) {
-      logger.debug(`频道 ${channelId} 未找到 ytInitialPlayerResponse，可能不在直播`)
-      return { isLive: false, title: '', author: '', viewCount: '', lastLiveId: '' }
+    
+    // 方案3: 如果 ytInitialPlayerResponse 不可用，查找直播标记
+    if (!playerMatch || !title) {
+      logger.info(`ytInitialPlayerResponse 不可用或无数据，查找直播标记...`)
+      const liveMarkers = [
+        htmlContent.includes('"isLive":true'),
+        htmlContent.includes('"isLiveContent":true'),
+        htmlContent.includes('"isLiveBroadcast":true'),
+        htmlContent.includes('class="live-badge'),
+        htmlContent.includes('streaming/live'),
+      ]
+      isLive = liveMarkers.some(m => m)
+      logger.info(`直播标记检测: ${isLive ? '有直播' : '无直播标记'}`)
     }
-
-    try {
-      const data: YoutubeResponse = JSON.parse(`{${match[1]}}`)
-      
-      const isLive = data.videoDetails?.isLive === true || !!(data.streamingData?.hlsManifestUrl)
-      
-      // 获取视频ID
-      const canonicalMatch = htmlContent.match(/link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^ "]+)"/)
-      const lastLiveId = canonicalMatch ? canonicalMatch[1] : data.videoDetails?.videoId || ''
-
-      logger.info(`频道 ${channelId} 状态: isLive=${isLive}, title=${data.videoDetails?.title || ''}`)
-      
-      return {
-        isLive,
-        title: data.videoDetails?.title || '',
-        author: data.videoDetails?.author || '',
-        viewCount: data.videoDetails?.viewCount || '',
-        lastLiveId
+    
+    // 方案4: 从 ytInitialData 提取标题和作者
+    if (!title) {
+      const dataMatch = htmlContent.match(/var ytInitialData = (\{[\s\S]*?\});/)
+      if (dataMatch) {
+        try {
+          const data = JSON.parse(dataMatch[1])
+          logger.info(`从 ytInitialData 提取信息...`)
+          // 这里可以添加更多提取逻辑
+        } catch (e) {
+          logger.debug(`ytInitialData 解析失败: ${(e as any).message}`)
+        }
       }
-    } catch (e) {
-      logger.debug(`频道 ${channelId} JSON 解析失败，可能不在直播`)
-      return { isLive: false, title: '', author: '', viewCount: '', lastLiveId: '' }
+    }
+    
+    logger.info(`频道 ${channelId} 最终状态: isLive=${isLive}, videoId=${videoId}, title=${title.substring(0, 30) || '无'}`)
+    
+    return {
+      isLive,
+      title,
+      author,
+      lastLiveId: videoId,
+      dateText: ''
     }
   } catch (e) {
     logger.error(`频道 ${channelId} 状态获取失败:`, e)
@@ -144,6 +219,9 @@ export function apply(ctx: Context, config: Config) {
     title: 'string',
     author: 'string',
     isLive: 'boolean',
+    dateText: 'string',
+    liveStartTime: 'integer',
+    lastReminderTime: 'integer',
   }, {
     primary: 'id',
   })
@@ -155,7 +233,6 @@ export function apply(ctx: Context, config: Config) {
     if (config.proxy) {
       try {
         await ctx.http.get('https://www.youtube.com', {
-          proxyAgent: config.proxy,
           timeout: 10000,
         })
         logger.info(`代理检测成功: ${config.proxy}`)
@@ -209,17 +286,21 @@ export function apply(ctx: Context, config: Config) {
 
     const check = async () => {
       const startTime = Date.now()
-      logger.debug('开始执行轮询检查...')
+      logger.info('开始执行轮询检查...')
       for (const channelConfig of config.channels) {
         try {
+          logger.info(`正在获取频道 ${channelConfig.id} 状态...`)
           const current = await getChannelStatus(ctx, channelConfig.id, config.proxy)
+          logger.info(`频道 ${channelConfig.id} 获取完成: isLive=${current.isLive}`)
+          
           const [saved] = await ctx.database.get('youtube_status', { id: channelConfig.id })
 
           if (!saved) {
             logger.info(`首次监控频道 ${channelConfig.id}，正在初始化数据`)
             await ctx.database.create('youtube_status', {
               id: channelConfig.id,
-              ...current
+              ...current,
+              liveStartTime: current.isLive ? Date.now() : 0
             })
             continue
           }
@@ -229,7 +310,11 @@ export function apply(ctx: Context, config: Config) {
           // 开播状态变更提醒
           if (current.isLive && (!saved.isLive || current.lastLiveId !== saved.lastLiveId)) {
             logger.info(`检测到频道 ${channelConfig.id} 正在直播: ${current.lastLiveId}`)
-            const content = `主播: ${current.author}\n标题: ${current.title}\n观看人数: ${current.viewCount}\n传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
+            const startDateTime = formatDateTime(saved.liveStartTime || Date.now())
+            const content = `主播: ${current.author}
+标题: ${current.title}
+开播时间: ${startDateTime}
+传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
             await sendMessage(
               channelConfig.targets,
               `YouTube 开播提醒 - ${current.author}`,
@@ -237,10 +322,44 @@ export function apply(ctx: Context, config: Config) {
             )
           }
 
+          // 每30分钟提醒一次正在直播
+          if (current.isLive && saved.isLive && saved.liveStartTime) {
+            const timeSinceLastReminder = Date.now() - (saved.lastReminderTime || saved.liveStartTime)
+            if (timeSinceLastReminder >= 30 * 60 * 1000) {
+              logger.info(`频道 ${channelConfig.id} 直播进行中，已开播 ${formatDuration(Math.floor((Date.now() - saved.liveStartTime) / 1000))}`)
+              const content = `直播仍在进行中
+开播时间: ${formatDateTime(saved.liveStartTime)}
+已直播: ${formatDuration(Math.floor((Date.now() - saved.liveStartTime) / 1000))}
+传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
+              await sendMessage(
+                channelConfig.targets,
+                `YouTube 直播进行中 - ${current.author}`,
+                content
+              )
+            }
+          }
+
+          // 直播结束提醒
+          if (!current.isLive && saved.isLive && saved.liveStartTime) {
+            logger.info(`检测到频道 ${channelConfig.id} 直播已结束`)
+            const duration = Math.floor((Date.now() - saved.liveStartTime) / 1000)
+            const content = `直播已结束
+总时长: ${formatDuration(duration)}
+最后标题: ${saved.title}`
+            await sendMessage(
+              channelConfig.targets,
+              `YouTube 直播结束 - ${saved.author}`,
+              content
+            )
+          }
+
           // 标题更新提醒 (开播时)
-          if (current.isLive && current.title && current.title !== saved.title) {
+          if (current.isLive && current.title && saved.title && current.title !== saved.title) {
             logger.info(`检测到频道 ${channelConfig.id} 标题变更: ${current.title}`)
-            const content = `新标题: ${current.title}\n观看人数: ${current.viewCount}\n传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
+            const startDateTime = formatDateTime(saved.liveStartTime || Date.now())
+            const content = `新标题: ${current.title}
+开播时间: ${startDateTime}
+传送门: https://www.youtube.com/watch?v=${current.lastLiveId}`
             await sendMessage(
               channelConfig.targets,
               `YouTube 直播更新 - ${current.author}`,
@@ -250,11 +369,15 @@ export function apply(ctx: Context, config: Config) {
 
           // 更新数据库记录
           await ctx.database.set('youtube_status', channelConfig.id, {
-            id: channelConfig.id,
             lastLiveId: current.lastLiveId,
             title: current.title,
             author: current.author,
-            isLive: current.isLive
+            isLive: current.isLive,
+            dateText: current.dateText || saved.dateText || '',
+            liveStartTime: (saved.isLive && saved.liveStartTime) ? saved.liveStartTime : (current.isLive ? Date.now() : 0),
+            lastReminderTime: (current.isLive && saved.isLive && (Date.now() - (saved.lastReminderTime || saved.liveStartTime)) >= 30 * 60 * 1000)
+              ? Date.now()
+              : (saved.lastReminderTime || 0)
           })
         } catch (e) {
           logger.error(`检查频道 ${channelConfig.id} 失败:`, e)

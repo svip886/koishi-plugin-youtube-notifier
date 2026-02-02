@@ -24,3 +24,5 @@ npm-debug.log*
 .temp/
 tmp/
 temp_ref/
+
+test-*.mjs
