@@ -43,12 +43,11 @@ MIT License.
 
 ## 更新日志
 
-### 2.0.16
+### 2.0.18
 
-- **改进**：直播检测多重备选方案，不再仅依赖 ytInitialPlayerResponse
-- **改进**：先检查 canonical videoId，再尝试 ytInitialPlayerResponse
-- **改进**：如果无法解析 ytInitialPlayerResponse，查找直播标记替代
-- **改进**：增强稳定性，页面格式变化不影响直播检测
+- **回滚**：撤销 v2.0.16/v2.0.17 的不稳定改动
+- **恢复**：回到经过验证的 v2.0.13 逻辑
+- **特性**：多重备选直播检测方案（canonical、ytInitialPlayerResponse、标记检测）
 
 ### 2.0.15
 
